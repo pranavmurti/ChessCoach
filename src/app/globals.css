@@ -22,5 +22,193 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Landing hero: soft animated mesh (no JS). */
+@keyframes home-gradient-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes home-float {
+  0%,
+  100% {
+    transform: translateY(0) translateX(0);
+  }
+  33% {
+    transform: translateY(-14px) translateX(6px);
+  }
+  66% {
+    transform: translateY(8px) translateX(-8px);
+  }
+}
+
+.home-hero-mesh {
+  background-image:
+    linear-gradient(135deg, rgb(14 165 233 / 0.09) 0%, transparent 42%),
+    linear-gradient(225deg, rgb(139 92 246 / 0.08) 0%, transparent 38%),
+    linear-gradient(180deg, transparent 0%, rgb(245 158 11 / 0.05) 100%);
+  background-size: 220% 220%;
+  animation: home-gradient-pan 20s ease-in-out infinite;
+}
+
+.dark .home-hero-mesh {
+  background-image:
+    linear-gradient(135deg, rgb(56 189 248 / 0.14) 0%, transparent 42%),
+    linear-gradient(225deg, rgb(167 139 250 / 0.12) 0%, transparent 38%),
+    linear-gradient(180deg, transparent 0%, rgb(251 191 36 / 0.07) 100%);
+}
+
+.home-float-slow {
+  animation: home-float 16s ease-in-out infinite;
+}
+
+.home-float-delayed {
+  animation: home-float 20s ease-in-out infinite;
+  animation-delay: -7s;
+}
+
+/* Review badge on destination square (top-right corner). */
+cg-board square.move-badge::after {
+  content: attr(data-icon);
+}
+
+cg-board square.move-badge {
+  overflow: visible;
+  pointer-events: none;
+}
+
+cg-board square.move-badge::before {
+  content: "";
+  position: absolute;
+  top: 6%;
+  right: 6%;
+  width: 24%;
+  height: 24%;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+cg-board square.move-badge::after {
+  position: absolute;
+  top: 6%;
+  right: 6%;
+  width: 24%;
+  height: 24%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  color: #111;
+  pointer-events: none;
+}
+
+cg-board square.move-badge-theory::before {
+  background: #a16207;
+}
+cg-board square.move-badge-theory::after {
+  content: "T";
+  color: #fff;
+}
+
+cg-board square.move-badge-mistake::before {
+  background: #f59e0b;
+}
+cg-board square.move-badge-mistake::after {
+  content: "?";
+}
+
+cg-board square.move-badge-inaccuracy::before {
+  background: #facc15;
+}
+cg-board square.move-badge-inaccuracy::after {
+  content: "?!";
+  font-size: 7px;
+}
+
+cg-board square.move-badge-blunder::before {
+  background: #dc2626;
+}
+cg-board square.move-badge-blunder::after {
+  content: "??";
+  color: #fff;
+  font-size: 7px;
+}
+
+cg-board square.move-badge-miss::before {
+  background: #ec4899;
+}
+cg-board square.move-badge-miss::after {
+  content: "M";
+  color: #fff;
+}
+
+cg-board square.move-badge-best::before {
+  background: #16a34a;
+}
+cg-board square.move-badge-best::after {
+  content: "★";
+  color: #fff;
+}
+
+cg-board square.move-badge-good::before {
+  background: #86efac;
+}
+cg-board square.move-badge-good::after {
+  content: "✓";
+  color: #064e3b;
+}
+
+cg-board square.move-badge-brilliant::before {
+  background: #38bdf8;
+}
+cg-board square.move-badge-brilliant::after {
+  content: "!!";
+  color: #fff;
+  font-size: 7px;
+}
+
+/* Pattern trainer: correct / wrong on destination square (top-right). */
+cg-board square.move-badge-puzzle_correct::before {
+  background: #16a34a;
+}
+cg-board square.move-badge-puzzle_correct::after {
+  content: "✓";
+  color: #fff;
+  font-size: 10px;
+}
+
+cg-board square.move-badge-puzzle_wrong::before {
+  background: #dc2626;
+}
+cg-board square.move-badge-puzzle_wrong::after {
+  content: "✕";
+  color: #fff;
+  font-size: 9px;
+}
+
+/* Pattern trainer: hint — piece to move */
+cg-board square.trainer-hint {
+  overflow: visible;
+}
+cg-board square.trainer-hint::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 3px rgba(234, 179, 8, 0.95),
+    0 0 12px rgba(234, 179, 8, 0.45);
+  pointer-events: none;
+  z-index: 2;
 }
