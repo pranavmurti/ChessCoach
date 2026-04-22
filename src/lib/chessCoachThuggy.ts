@@ -202,18 +202,25 @@ async function probeAskedMove(
   const probe = new Chess(currentFen);
   const uciAsked = askedMoveToken.match(/^[a-h][1-8][a-h][1-8][qrbn]?$/i);
   let playedSan: string | null = null;
-  if (uciAsked) {
-    const promo = askedMoveToken[4]?.toLowerCase();
-    const playedObj = probe.move({
-      from: askedMoveToken.slice(0, 2) as never,
-      to: askedMoveToken.slice(2, 4) as never,
-      promotion:
-        promo && ["q", "r", "b", "n"].includes(promo) ? (promo as "q" | "r" | "b" | "n") : undefined,
-    });
-    if (playedObj) playedSan = playedObj.san;
-  } else {
-    const playedObj = probe.move(askedMoveToken, { strict: false } as never);
-    if (playedObj) playedSan = playedObj.san;
+  try {
+    if (uciAsked) {
+      const promo = askedMoveToken[4]?.toLowerCase();
+      const playedObj = probe.move({
+        from: askedMoveToken.slice(0, 2) as never,
+        to: askedMoveToken.slice(2, 4) as never,
+        promotion:
+          promo && ["q", "r", "b", "n"].includes(promo)
+            ? (promo as "q" | "r" | "b" | "n")
+            : undefined,
+      });
+      if (playedObj) playedSan = playedObj.san;
+    } else {
+      // SAN parsing can throw on malformed/illegal text; treat it as "not legal here".
+      const playedObj = probe.move(askedMoveToken, { strict: false } as never);
+      if (playedObj) playedSan = playedObj.san;
+    }
+  } catch {
+    return null;
   }
   if (!playedSan) return null;
 

@@ -6,13 +6,14 @@ import { usePathname } from "next/navigation";
 const nav = [
   { href: "/coach", label: "Analyze" },
   { href: "/patterns", label: "Patterns" },
+  { href: "/statistics", label: "Statistics" },
 ] as const;
 
 export function AppHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-black/[0.06] bg-white/80 backdrop-blur-md dark:border-white/[0.08] dark:bg-zinc-950/80">
+    <header className="sticky top-0 z-50 bg-white/70 shadow-[0_1px_0_rgba(28,25,23,0.06)] backdrop-blur-md dark:bg-zinc-950/70 dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
         <Link
           href="/"

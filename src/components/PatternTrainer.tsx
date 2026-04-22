@@ -87,8 +87,6 @@ type Props = {
   onSessionComplete: () => void;
 };
 
-/** Time from one programmatic move to the next (solution + opponent reply). */
-const SOLUTION_STEP_MS = 700;
 /** Chessground slide duration for those moves (keep ≤ step so moves don’t overlap). */
 const MOVE_ANIM_MS = 620;
 
@@ -97,7 +95,7 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
   const [playIndex, setPlayIndex] = useState(0);
   const [moveBadge, setMoveBadge] = useState<ChessBoardProps["moveBadge"]>(null);
   const [hintSquare, setHintSquare] = useState<string | null>(null);
-  const [solutionPlaying, setSolutionPlaying] = useState(false);
+  const [solutionStepping, setSolutionStepping] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
     () => (queue[0] ? userPovFromRoot(queue[0].startFen) : "white"),
   );
@@ -107,20 +105,9 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
   playIndexRef.current = playIndex;
   const appliedPliesRef = useRef(0);
   const feedbackLockRef = useRef(false);
-  const solutionTimersRef = useRef<number[]>([]);
-
-  const clearSolutionTimers = useCallback(() => {
-    for (const t of solutionTimersRef.current) {
-      window.clearTimeout(t);
-    }
-    solutionTimersRef.current = [];
-  }, []);
-
   useEffect(() => {
-    clearSolutionTimers();
-    setSolutionPlaying(false);
-    return () => clearSolutionTimers();
-  }, [clearSolutionTimers, playIndex, queue]);
+    setSolutionStepping(false);
+  }, [playIndex, queue]);
 
   useEffect(() => {
     if (!queue.length) return;
@@ -153,65 +140,79 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
     }
   }, [onSessionComplete]);
 
-  const scheduleTimeout = useCallback((fn: () => void, delay: number) => {
-    const id = window.setTimeout(() => {
-      solutionTimersRef.current = solutionTimersRef.current.filter((x) => x !== id);
-      fn();
-    }, delay);
-    solutionTimersRef.current.push(id);
+  const stepToPly = useCallback((next: number) => {
+    const item = queueRef.current[playIndexRef.current];
+    if (!item) return;
+    const tokens = parsePvUci(item.pvUci);
+    const clamped = Math.max(0, Math.min(tokens.length, next));
+    const fen = fenAfterPlies(item.startFen, tokens, clamped);
+    if (!fen) return;
+    const uci = clamped > 0 ? tokens[clamped - 1] : undefined;
+    const lm = uci ? uciToLastMove(uci) : undefined;
+    boardRef.current?.setFen(fen, {
+      animate: true,
+      lastMove: lm,
+      animationDurationMs: MOVE_ANIM_MS,
+    });
+    appliedPliesRef.current = clamped;
+    setHintSquare(null);
   }, []);
 
-  const playSolution = useCallback(() => {
-    if (feedbackLockRef.current || solutionPlaying) return;
+  const stepForward = useCallback(() => {
+    if (feedbackLockRef.current || solutionStepping) return;
     const item = queueRef.current[playIndexRef.current];
     if (!item) return;
     const tokens = parsePvUci(item.pvUci);
     const k = appliedPliesRef.current;
     if (k >= tokens.length) return;
-
-    clearSolutionTimers();
-    setHintSquare(null);
-    setSolutionPlaying(true);
+    setSolutionStepping(true);
     feedbackLockRef.current = true;
-
-    let next = k;
-    const playStep = () => {
-      next += 1;
-      const fen = fenAfterPlies(item.startFen, tokens, next);
-      if (!fen) {
-        setSolutionPlaying(false);
-        feedbackLockRef.current = false;
+    stepToPly(k + 1);
+    window.setTimeout(() => {
+      const afterFirst = appliedPliesRef.current;
+      const canAutoReply =
+        // Root is user's move, so even ply-count means user's turn.
+        k % 2 === 0 &&
+        afterFirst < tokens.length;
+      if (canAutoReply) {
+        stepToPly(afterFirst + 1);
+        window.setTimeout(() => {
+          setSolutionStepping(false);
+          if (appliedPliesRef.current >= tokens.length) {
+            advanceQueue();
+          } else {
+            feedbackLockRef.current = false;
+          }
+        }, MOVE_ANIM_MS + 80);
         return;
       }
-      const uci = tokens[next - 1];
-      const lm = uci ? uciToLastMove(uci) : undefined;
-      boardRef.current?.setFen(fen, {
-        animate: true,
-        lastMove: lm,
-        animationDurationMs: MOVE_ANIM_MS,
-      });
-      appliedPliesRef.current = next;
-
-      if (next >= tokens.length) {
-        scheduleTimeout(() => {
-          setSolutionPlaying(false);
-          advanceQueue();
-        }, SOLUTION_STEP_MS);
-        return;
+      setSolutionStepping(false);
+      feedbackLockRef.current = false;
+      if (appliedPliesRef.current >= tokens.length) {
+        advanceQueue();
       }
-      scheduleTimeout(playStep, SOLUTION_STEP_MS);
-    };
+    }, MOVE_ANIM_MS + 80);
+  }, [advanceQueue, solutionStepping, stepToPly]);
 
-    scheduleTimeout(playStep, SOLUTION_STEP_MS);
-  }, [
-    advanceQueue,
-    clearSolutionTimers,
-    scheduleTimeout,
-    solutionPlaying,
-  ]);
+  const stepBack = useCallback(() => {
+    if (feedbackLockRef.current || solutionStepping) return;
+    const k = appliedPliesRef.current;
+    if (k <= 0) return;
+    setSolutionStepping(true);
+    feedbackLockRef.current = true;
+    stepToPly(k - 1);
+    window.setTimeout(() => {
+      setSolutionStepping(false);
+      feedbackLockRef.current = false;
+    }, MOVE_ANIM_MS + 80);
+  }, [solutionStepping, stepToPly]);
+
+  const playSolution = useCallback(() => {
+    stepForward();
+  }, [stepForward]);
 
   const toggleHint = useCallback(() => {
-    if (feedbackLockRef.current || solutionPlaying) return;
+    if (feedbackLockRef.current || solutionStepping) return;
     const item = queueRef.current[playIndexRef.current];
     if (!item) return;
     const tokens = parsePvUci(item.pvUci);
@@ -220,7 +221,7 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
     if (!uci) return;
     const from = uci.slice(0, 2);
     setHintSquare((prev) => (prev === from ? null : from));
-  }, [solutionPlaying]);
+  }, [solutionStepping]);
 
   const handleBoardMove = useCallback(
     (m: { uci: string; san: string; color: "w" | "b" }) => {
@@ -263,12 +264,11 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
           }
           const t = parsePvUci(cur.pvUci);
           const afterUser = appliedPliesRef.current;
-
           if (afterUser >= t.length) {
             advanceQueue();
             return;
           }
-
+          // Auto-play opponent reply, then pause on user's next move.
           const afterOpp = afterUser + 1;
           const nextFen = fenAfterPlies(cur.startFen, t, afterOpp);
           if (!nextFen) {
@@ -285,9 +285,13 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
           });
 
           if (afterOpp >= t.length) {
-            advanceQueue();
+            window.setTimeout(() => {
+              advanceQueue();
+            }, MOVE_ANIM_MS + 80);
           } else {
-            feedbackLockRef.current = false;
+            window.setTimeout(() => {
+              feedbackLockRef.current = false;
+            }, MOVE_ANIM_MS + 80);
           }
         }, 850);
       } else {
@@ -312,7 +316,9 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
   if (!current) return null;
 
   const tokens = parsePvUci(current.pvUci);
-  const canAssist = tokens.length > 0 && !solutionPlaying;
+  const canAssist = tokens.length > 0 && !solutionStepping;
+  const canBack = canAssist && appliedPliesRef.current > 0;
+  const canForward = canAssist && appliedPliesRef.current < tokens.length;
 
   return (
     <section className="sticky top-4 z-10 rounded-2xl border border-black/[0.06] bg-white/85 p-5 shadow-md ring-1 ring-black/[0.04] backdrop-blur-md dark:border-white/[0.08] dark:bg-zinc-900/85 dark:ring-white/[0.06]">
@@ -356,19 +362,34 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
           disabled={!canAssist}
           className="rounded-xl border border-sky-500/40 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-950 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-sky-400/35 dark:bg-sky-950/50 dark:text-sky-100 dark:hover:bg-sky-900/50"
         >
-          Solution
+          Solution (next move)
+        </button>
+        <button
+          type="button"
+          onClick={stepBack}
+          disabled={!canBack}
+          className="rounded-xl border border-black/[0.12] bg-white px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-zinc-900 dark:hover:bg-white/[0.06]"
+        >
+          ← Back
+        </button>
+        <button
+          type="button"
+          onClick={stepForward}
+          disabled={!canForward}
+          className="rounded-xl border border-black/[0.12] bg-white px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-zinc-900 dark:hover:bg-white/[0.06]"
+        >
+          Forward →
         </button>
       </div>
       <p className="mb-2 text-[10px] text-foreground/45">
-        Hint highlights the piece to move. Solution animates the full engine
-        line (~0.62s move slide, ~0.7s between plies), then after a final pause
-        continues to the next puzzle.
+        Hint highlights the piece to move. Solution reveals one move at a time.
+        Use Back/Forward arrows to step through the line manually.
       </p>
 
       <div className="mx-auto flex max-w-[min(90vmin,560px)] justify-center">
         <ChessBoard
           ref={boardRef}
-          viewOnly={solutionPlaying}
+          viewOnly={solutionStepping}
           onMove={handleBoardMove}
           moveBadge={moveBadge}
           boardOrientation={boardOrientation}

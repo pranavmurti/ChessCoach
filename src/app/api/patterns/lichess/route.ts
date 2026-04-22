@@ -5,7 +5,7 @@ import { splitConcatenatedPgns } from "@/lib/patternsParse";
 export async function GET(req: NextRequest) {
   const username = req.nextUrl.searchParams.get("username")?.trim();
   const maxRaw = Number(req.nextUrl.searchParams.get("max") ?? "50");
-  const max = Math.min(500, Math.max(10, Number.isFinite(maxRaw) ? maxRaw : 50));
+  const max = Math.min(1000, Math.max(10, Number.isFinite(maxRaw) ? maxRaw : 50));
 
   if (!username) {
     return NextResponse.json({ error: "Missing username" }, { status: 400 });

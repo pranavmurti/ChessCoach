@@ -13,10 +13,6 @@ export default function CoachPage() {
         <h1 className="mt-3 text-3xl font-bold tracking-tight text-foreground md:text-4xl">
           Analyze &amp; review
         </h1>
-        <p className="mt-4 text-sm leading-relaxed text-foreground/70 md:text-base">
-          Play moves, paste a FEN or PGN, run live Stockfish, full-game review
-          with eval graph, and level-aware coach lines — all in your browser.
-        </p>
       </header>
 
       <div className="mt-10 flex w-full justify-center">

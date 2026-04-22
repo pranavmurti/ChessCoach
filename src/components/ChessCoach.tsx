@@ -170,11 +170,6 @@ export function ChessCoach() {
     null,
   );
 
-  const openingArmed = useMemo(
-    () => !blunderDetected && !isPastOpeningPhase(fen),
-    [blunderDetected, fen],
-  );
-
   const allowCoachSuggestions = useMemo(
     () => isPastOpeningPhase(fen) || blunderDetected,
     [fen, blunderDetected],
@@ -904,11 +899,6 @@ export function ChessCoach() {
           ) : null}
         </div>
 
-        {analysisStale && liveEnabled ? (
-          <p className="text-xs text-foreground/60">
-            Top lines update on “Analyze”; live eval only updates the eval bar.
-          </p>
-        ) : null}
       </div>
 
       <aside className="w-full flex-1 space-y-4 rounded-2xl border border-black/[0.06] bg-white/65 p-5 shadow-sm ring-1 ring-black/[0.04] backdrop-blur-sm dark:border-white/[0.08] dark:bg-zinc-900/55 dark:ring-white/[0.05] lg:max-w-md">
@@ -925,13 +915,6 @@ export function ChessCoach() {
 
         <div>
           <h2 className="text-sm font-semibold text-foreground">Coach</h2>
-          <p className="mt-1 text-xs leading-relaxed text-foreground/65">
-            Eval from White’s perspective, mirrored for board orientation. Early
-            moves use the opening book; rich writeups apply once out of book.
-            {openingArmed
-              ? ` (Opening filter active until fullmove > ${OPENING_MAX_FULLMOVE}.)`
-              : null}
-          </p>
         </div>
 
         <div className="space-y-2">

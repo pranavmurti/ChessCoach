@@ -182,10 +182,7 @@ export default function PatternsPage() {
             Enter a public{" "}
             <span className="font-medium text-foreground">Lichess</span> or{" "}
             <span className="font-medium text-foreground">Chess.com</span>{" "}
-            username. Games are fetched on the server; Stockfish runs in{" "}
-            <span className="font-medium text-foreground">your browser</span> to
-            find recurring mistakes and puzzle seeds. No passwords — public data
-            only.
+            username.
           </p>
         </header>
 
@@ -231,12 +228,12 @@ export default function PatternsPage() {
 
         <label className="block space-y-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-foreground/55">
-            Recent games to fetch (10–500)
+            Recent games to fetch (10–1000)
           </span>
           <input
             type="range"
             min={10}
-            max={500}
+            max={1000}
             step={10}
             value={fetchCount}
             onChange={(e) => setFetchCount(Number(e.target.value))}
