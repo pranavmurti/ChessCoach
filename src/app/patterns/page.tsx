@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SitePageShell } from "@/components/SitePageShell";
 import {
@@ -52,6 +52,20 @@ export default function PatternsPage() {
     | null
   >(null);
   const engineRef = useRef<StockfishClient | null>(null);
+  const rowRefs = useRef<Record<string, HTMLLIElement | null>>({});
+
+  useEffect(() => {
+    if (!trainerAnchor) return;
+    const key =
+      trainerAnchor.type === "mistake"
+        ? `mistake:${trainerAnchor.cat}:${trainerAnchor.index}`
+        : `puzzle:${trainerAnchor.index}`;
+    const el = rowRefs.current[key];
+    if (!el) return;
+    window.setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  }, [trainerAnchor, trainerSessionKey]);
 
   const endTrainerSession = useCallback(() => {
     setTrainerQueue([]);
@@ -361,7 +375,12 @@ export default function PatternsPage() {
                   </li>
                 ) : (
                   result.topMistakes[cat].map((m, i) => (
-                    <li key={`${m.bestUci}-${m.playedUci}-${i}`}>
+                    <li
+                      key={`${m.bestUci}-${m.playedUci}-${i}`}
+                      ref={(el) => {
+                        rowRefs.current[`mistake:${cat}:${i}`] = el;
+                      }}
+                    >
                       <button
                         type="button"
                         onClick={() => startTrainerFromMistakes(cat, i, result)}
@@ -396,7 +415,7 @@ export default function PatternsPage() {
                       trainerAnchor?.type === "mistake" &&
                       trainerAnchor.cat === cat &&
                       trainerAnchor.index === i ? (
-                        <div className="px-5 pb-4">
+                        <div className="px-5 pb-4 animate-in fade-in slide-in-from-top-1 duration-200">
                           <PatternTrainer
                             key={trainerSessionKey}
                             queue={trainerQueue}
@@ -424,7 +443,12 @@ export default function PatternsPage() {
             </div>
             <ul className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">
               {result.puzzles.map((p, i) => (
-                <li key={i}>
+                <li
+                  key={i}
+                  ref={(el) => {
+                    rowRefs.current[`puzzle:${i}`] = el;
+                  }}
+                >
                   <div className="px-5 py-4">
                     <button
                       type="button"
@@ -470,12 +494,14 @@ export default function PatternsPage() {
                     {trainerQueue.length > 0 &&
                     trainerAnchor?.type === "puzzle" &&
                     trainerAnchor.index === i ? (
-                      <PatternTrainer
-                        key={trainerSessionKey}
-                        queue={trainerQueue}
-                        onSessionComplete={endTrainerSession}
-                        inline
-                      />
+                      <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+                        <PatternTrainer
+                          key={trainerSessionKey}
+                          queue={trainerQueue}
+                          onSessionComplete={endTrainerSession}
+                          inline
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </li>

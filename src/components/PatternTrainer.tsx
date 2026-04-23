@@ -97,6 +97,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
   const [moveBadge, setMoveBadge] = useState<ChessBoardProps["moveBadge"]>(null);
   const [hintSquare, setHintSquare] = useState<string | null>(null);
   const [solutionStepping, setSolutionStepping] = useState(false);
+  const [puzzleCompleted, setPuzzleCompleted] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">(
     () => (queue[0] ? userPovFromRoot(queue[0].startFen) : "white"),
   );
@@ -108,6 +109,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
   const feedbackLockRef = useRef(false);
   useEffect(() => {
     setSolutionStepping(false);
+    setPuzzleCompleted(false);
   }, [playIndex, queue]);
 
   useEffect(() => {
@@ -122,6 +124,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
       requestAnimationFrame(() => {
         boardRef.current?.setFen(item.startFen);
         setMoveBadge(null);
+        setPuzzleCompleted(false);
         feedbackLockRef.current = false;
       });
     });
@@ -160,7 +163,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
   }, []);
 
   const stepForward = useCallback(() => {
-    if (feedbackLockRef.current || solutionStepping) return;
+    if (feedbackLockRef.current || solutionStepping || puzzleCompleted) return;
     const item = queueRef.current[playIndexRef.current];
     if (!item) return;
     const tokens = parsePvUci(item.pvUci);
@@ -180,7 +183,8 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
         window.setTimeout(() => {
           setSolutionStepping(false);
           if (appliedPliesRef.current >= tokens.length) {
-            advanceQueue();
+            setPuzzleCompleted(true);
+            feedbackLockRef.current = false;
           } else {
             feedbackLockRef.current = false;
           }
@@ -190,13 +194,14 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
       setSolutionStepping(false);
       feedbackLockRef.current = false;
       if (appliedPliesRef.current >= tokens.length) {
-        advanceQueue();
+        setPuzzleCompleted(true);
+        feedbackLockRef.current = false;
       }
     }, MOVE_ANIM_MS + 80);
-  }, [advanceQueue, solutionStepping, stepToPly]);
+  }, [puzzleCompleted, solutionStepping, stepToPly]);
 
   const stepBack = useCallback(() => {
-    if (feedbackLockRef.current || solutionStepping) return;
+    if (feedbackLockRef.current || solutionStepping || puzzleCompleted) return;
     const k = appliedPliesRef.current;
     if (k <= 0) return;
     setSolutionStepping(true);
@@ -206,14 +211,14 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
       setSolutionStepping(false);
       feedbackLockRef.current = false;
     }, MOVE_ANIM_MS + 80);
-  }, [solutionStepping, stepToPly]);
+  }, [puzzleCompleted, solutionStepping, stepToPly]);
 
   const playSolution = useCallback(() => {
     stepForward();
   }, [stepForward]);
 
   const toggleHint = useCallback(() => {
-    if (feedbackLockRef.current || solutionStepping) return;
+    if (feedbackLockRef.current || solutionStepping || puzzleCompleted) return;
     const item = queueRef.current[playIndexRef.current];
     if (!item) return;
     const tokens = parsePvUci(item.pvUci);
@@ -222,7 +227,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
     if (!uci) return;
     const from = uci.slice(0, 2);
     setHintSquare((prev) => (prev === from ? null : from));
-  }, [solutionStepping]);
+  }, [puzzleCompleted, solutionStepping]);
 
   const handleBoardMove = useCallback(
     (m: { uci: string; san: string; color: "w" | "b" }) => {
@@ -266,7 +271,8 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
           const t = parsePvUci(cur.pvUci);
           const afterUser = appliedPliesRef.current;
           if (afterUser >= t.length) {
-            advanceQueue();
+            setPuzzleCompleted(true);
+            feedbackLockRef.current = false;
             return;
           }
           // Auto-play opponent reply, then pause on user's next move.
@@ -287,7 +293,8 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
 
           if (afterOpp >= t.length) {
             window.setTimeout(() => {
-              advanceQueue();
+              setPuzzleCompleted(true);
+              feedbackLockRef.current = false;
             }, MOVE_ANIM_MS + 80);
           } else {
             window.setTimeout(() => {
@@ -308,7 +315,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
         }, 900);
       }
     },
-    [advanceQueue],
+    [puzzleCompleted],
   );
 
   if (!queue.length) return null;
@@ -320,6 +327,7 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
   const canAssist = tokens.length > 0 && !solutionStepping;
   const canBack = canAssist && appliedPliesRef.current > 0;
   const canForward = canAssist && appliedPliesRef.current < tokens.length;
+  const hasNextPuzzle = playIndex + 1 < queue.length;
 
   return (
     <section
@@ -380,12 +388,39 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
         <button
           type="button"
           onClick={stepForward}
-          disabled={!canForward}
+          disabled={!canForward || puzzleCompleted}
           className="rounded-xl border border-black/[0.12] bg-white px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-black/[0.04] disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-zinc-900 dark:hover:bg-white/[0.06]"
         >
           Forward →
         </button>
       </div>
+      {puzzleCompleted ? (
+        <div className="mb-3 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
+          <div className="font-semibold">✓ Completed!</div>
+          <div className="mt-1 text-xs text-emerald-700/90 dark:text-emerald-300/90">
+            You finished this puzzle line.
+          </div>
+          <div className="mt-2 flex gap-2">
+            {hasNextPuzzle ? (
+              <button
+                type="button"
+                onClick={advanceQueue}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+              >
+                Next puzzle →
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onSessionComplete}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+              >
+                Finish session
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
       <p className="mb-2 text-[10px] text-foreground/45">
         Hint highlights the piece to move. Solution reveals one move at a time.
         Use Back/Forward arrows to step through the line manually.
