@@ -85,12 +85,13 @@ export function movesMatch(
 type Props = {
   queue: TrainerQueueItem[];
   onSessionComplete: () => void;
+  inline?: boolean;
 };
 
 /** Chessground slide duration for those moves (keep ≤ step so moves don’t overlap). */
 const MOVE_ANIM_MS = 620;
 
-export function PatternTrainer({ queue, onSessionComplete }: Props) {
+export function PatternTrainer({ queue, onSessionComplete, inline = false }: Props) {
   const boardRef = useRef<ChessBoardHandle>(null);
   const [playIndex, setPlayIndex] = useState(0);
   const [moveBadge, setMoveBadge] = useState<ChessBoardProps["moveBadge"]>(null);
@@ -321,7 +322,11 @@ export function PatternTrainer({ queue, onSessionComplete }: Props) {
   const canForward = canAssist && appliedPliesRef.current < tokens.length;
 
   return (
-    <section className="sticky top-4 z-10 rounded-2xl border border-black/[0.06] bg-white/85 p-5 shadow-md ring-1 ring-black/[0.04] backdrop-blur-md dark:border-white/[0.08] dark:bg-zinc-900/85 dark:ring-white/[0.06]">
+    <section
+      className={`rounded-2xl border border-black/[0.06] bg-white/85 p-5 shadow-md ring-1 ring-black/[0.04] backdrop-blur-md dark:border-white/[0.08] dark:bg-zinc-900/85 dark:ring-white/[0.06] ${
+        inline ? "mt-3" : "sticky top-4 z-10"
+      }`}
+    >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-foreground">

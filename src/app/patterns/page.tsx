@@ -46,10 +46,16 @@ export default function PatternsPage() {
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
   const [trainerQueue, setTrainerQueue] = useState<TrainerQueueItem[]>([]);
   const [trainerSessionKey, setTrainerSessionKey] = useState(0);
+  const [trainerAnchor, setTrainerAnchor] = useState<
+    | { type: "mistake"; cat: MistakeCategory; index: number }
+    | { type: "puzzle"; index: number }
+    | null
+  >(null);
   const engineRef = useRef<StockfishClient | null>(null);
 
   const endTrainerSession = useCallback(() => {
     setTrainerQueue([]);
+    setTrainerAnchor(null);
   }, []);
 
   const startTrainerFromMistakes = useCallback(
@@ -57,6 +63,7 @@ export default function PatternsPage() {
       const list = data.topMistakes[cat].slice(startIndex);
       if (!list.length) return;
       setTrainerSessionKey((k) => k + 1);
+      setTrainerAnchor({ type: "mistake", cat, index: startIndex });
       setTrainerQueue(
         list.map((m) => ({
           startFen: m.exampleFen,
@@ -73,6 +80,7 @@ export default function PatternsPage() {
       const list = data.puzzles.slice(startIndex);
       if (!list.length) return;
       setTrainerSessionKey((k) => k + 1);
+      setTrainerAnchor({ type: "puzzle", index: startIndex });
       setTrainerQueue(
         list.map((p) => ({
           startFen: p.fen,
@@ -324,14 +332,6 @@ export default function PatternsPage() {
             </div>
           </div>
 
-          {trainerQueue.length > 0 ? (
-            <PatternTrainer
-              key={trainerSessionKey}
-              queue={trainerQueue}
-              onSessionComplete={endTrainerSession}
-            />
-          ) : null}
-
           <p className="max-w-3xl text-sm leading-relaxed text-foreground/60">
             Click a row to train on the board. Your color stays at the bottom;
             after each correct move the opponent reply is played from the engine
@@ -392,6 +392,19 @@ export default function PatternsPage() {
                           </a>
                         </div>
                       ) : null}
+                      {trainerQueue.length > 0 &&
+                      trainerAnchor?.type === "mistake" &&
+                      trainerAnchor.cat === cat &&
+                      trainerAnchor.index === i ? (
+                        <div className="px-5 pb-4">
+                          <PatternTrainer
+                            key={trainerSessionKey}
+                            queue={trainerQueue}
+                            onSessionComplete={endTrainerSession}
+                            inline
+                          />
+                        </div>
+                      ) : null}
                     </li>
                   ))
                 )}
@@ -416,7 +429,7 @@ export default function PatternsPage() {
                     <button
                       type="button"
                       onClick={() => startTrainerFromPuzzles(i, result)}
-                      className="w-full rounded-xl text-left transition hover:opacity-90"
+                      className="w-full rounded-xl px-2 py-1 text-left transition hover:bg-violet-500/[0.08] dark:hover:bg-violet-400/[0.1]"
                     >
                       <div className="text-sm text-foreground/90">
                         {p.prompt}
@@ -453,6 +466,16 @@ export default function PatternsPage() {
                       <div className="mt-2 rounded-xl bg-black/[0.04] px-3 py-2 font-mono text-sm text-foreground dark:bg-white/[0.06]">
                         {p.solutionUci}
                       </div>
+                    ) : null}
+                    {trainerQueue.length > 0 &&
+                    trainerAnchor?.type === "puzzle" &&
+                    trainerAnchor.index === i ? (
+                      <PatternTrainer
+                        key={trainerSessionKey}
+                        queue={trainerQueue}
+                        onSessionComplete={endTrainerSession}
+                        inline
+                      />
                     ) : null}
                   </div>
                 </li>
