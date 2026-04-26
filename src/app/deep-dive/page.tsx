@@ -37,6 +37,34 @@ type CoachProfile = {
   maxGames: number;
 };
 
+function AssistantFlowText({
+  text,
+  animate,
+}: {
+  text: string;
+  animate: boolean;
+}) {
+  const [shown, setShown] = useState(animate ? "" : text);
+
+  useEffect(() => {
+    if (!animate) {
+      setShown(text);
+      return;
+    }
+    const tokens = text.split(/(\s+)/);
+    let i = 0;
+    setShown("");
+    const timer = window.setInterval(() => {
+      i = Math.min(tokens.length, i + 1);
+      setShown(tokens.slice(0, i).join(""));
+      if (i >= tokens.length) window.clearInterval(timer);
+    }, 24);
+    return () => window.clearInterval(timer);
+  }, [text, animate]);
+
+  return <span className="block">{shown}</span>;
+}
+
 type PersistedState = {
   profile: CoachProfile;
   stage: OnboardingStage;
@@ -149,9 +177,12 @@ export default function DeepDivePage() {
   > | null>(null);
   const [reviewPly, setReviewPly] = useState(0);
   const [reviewUserLineMode, setReviewUserLineMode] = useState(false);
+  const [flowMessageId, setFlowMessageId] = useState<string | null>(null);
 
   const pushAssistant = (text: string, nextSuggestions?: string[]) => {
-    setMessages((prev) => [...prev, { id: uid(), role: "assistant", text }]);
+    const id = uid();
+    setFlowMessageId(id);
+    setMessages((prev) => [...prev, { id, role: "assistant", text }]);
     if (nextSuggestions) setSuggestions(nextSuggestions);
   };
 
@@ -206,6 +237,7 @@ export default function DeepDivePage() {
       if (Array.isArray(parsed.messages) && parsed.messages.length) {
         setMessages(parsed.messages.slice(-80));
       }
+      setFlowMessageId(null);
     } catch {
       // ignore corrupted memory
     } finally {
@@ -488,9 +520,11 @@ export default function DeepDivePage() {
       if (!reply.ok || !data.answer?.trim()) {
         throw new Error([data.error, data.detail].filter(Boolean).join(": ") || "No reply");
       }
+      const id = uid();
+      setFlowMessageId(id);
       setMessages((prev) => [
         ...prev,
-        { id: uid(), role: "assistant", text: cleanCoachText(data.answer!) },
+        { id, role: "assistant", text: cleanCoachText(data.answer!) },
       ]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Coach reply failed.";
@@ -649,7 +683,14 @@ export default function DeepDivePage() {
                       : "ml-auto bg-sky-600 text-white"
                   }`}
                 >
-                  <span className="block">{m.text}</span>
+                  {m.role === "assistant" ? (
+                    <AssistantFlowText
+                      text={m.text}
+                      animate={m.id === flowMessageId}
+                    />
+                  ) : (
+                    <span className="block">{m.text}</span>
+                  )}
                 </div>
               </div>
             ))}
