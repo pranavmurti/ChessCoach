@@ -69,6 +69,21 @@ function cleanCoachText(raw: string): string {
     .trim();
 }
 
+function isSkipToken(input: string): boolean {
+  const v = input.trim().toLowerCase();
+  return (
+    v === "skip" ||
+    v === "skip onboarding" ||
+    v === "skip for now" ||
+    v === "later"
+  );
+}
+
+function isNoneToken(input: string): boolean {
+  const v = input.trim().toLowerCase();
+  return v === "none" || v === "no account" || v === "dont have one" || v === "don't have one";
+}
+
 function summarizeStats(result: StatsScanResult): string {
   const topW = result.topOpeningsWhite[0];
   const topB = result.topOpeningsBlack[0];
@@ -122,6 +137,7 @@ export default function DeepDivePage() {
     "Intermediate",
     "Advanced",
     "Around 1500 rapid",
+    "Skip onboarding",
   ]);
   const [gamePgn, setGamePgn] = useState("");
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -268,9 +284,45 @@ export default function DeepDivePage() {
     }
   };
 
-  const handleOnboarding = async (input: string): Promise<boolean> => {
+  const learnProfileFromFreeText = (input: string) => {
+    const lower = input.toLowerCase();
+    const ratingMatch = lower.match(/\b(\d{3,4})\b/);
+    if (ratingMatch && !profile.skillLevel) {
+      setProfile((p) => ({ ...p, skillLevel: `Around ${ratingMatch[1]} rating` }));
+    }
+    const hoursMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b/);
+    if (hoursMatch && !profile.weeklyHours) {
+      setProfile((p) => ({ ...p, weeklyHours: String(hoursMatch[1]) }));
+    }
+    if ((lower.includes("goal") || lower.includes("want to")) && !profile.goal) {
+      setProfile((p) => ({ ...p, goal: input.slice(0, 120) }));
+    }
+    if (lower.includes("chess.com") && profile.provider !== "chesscom") {
+      setProfile((p) => ({ ...p, provider: "chesscom" }));
+    }
+    if (lower.includes("lichess") && profile.provider !== "lichess") {
+      setProfile((p) => ({ ...p, provider: "lichess" }));
+    }
+  };
+
+  const handleOnboarding = async (
+    input: string,
+  ): Promise<"consumed_wait" | "consumed_ready" | "not_consumed"> => {
     const value = input.trim();
-    if (!value) return true;
+    if (!value) return "consumed_wait";
+
+    if (isSkipToken(value)) {
+      setStage("ready");
+      setSuggestions([
+        "Why am I losing games in this opening?",
+        "Give me a 2-week training plan",
+        "What should I focus on as White vs Black?",
+      ]);
+      pushAssistant(
+        "No problem — skipping onboarding for now. You can chat immediately, and share your profile details anytime later.",
+      );
+      return "consumed_ready";
+    }
 
     if (stage === "welcome" || stage === "skill") {
       setProfile((p) => ({ ...p, skillLevel: value }));
@@ -282,9 +334,10 @@ export default function DeepDivePage() {
           "Stop blundering in middle game",
           "Improve opening understanding",
           "Play more confidently in endgames",
+          "Skip onboarding",
         ],
       );
-      return true;
+      return "consumed_wait";
     }
 
     if (stage === "goal") {
@@ -295,37 +348,76 @@ export default function DeepDivePage() {
         "4",
         "6",
         "8+",
+        "Skip onboarding",
       ]);
-      return true;
+      return "consumed_wait";
     }
 
     if (stage === "hours") {
       setProfile((p) => ({ ...p, weeklyHours: value }));
       setStage("provider");
-      pushAssistant("Which account should I analyze first?", ["Chess.com", "Lichess"]);
-      return true;
+      pushAssistant("Which account should I analyze first?", [
+        "Chess.com",
+        "Lichess",
+        "None",
+        "Skip onboarding",
+      ]);
+      return "consumed_wait";
     }
 
     if (stage === "provider") {
+      if (isNoneToken(value)) {
+        setStage("ready");
+        setSuggestions([
+          "Help me build a plan without account data",
+          "What should I work on first?",
+          "I can share my profile details now",
+        ]);
+        pushAssistant(
+          "All good — we can continue without an account. If you want, you can connect Chess.com/Lichess later anytime.",
+        );
+        return "consumed_ready";
+      }
       const normalized = value.toLowerCase();
       const provider: "chesscom" | "lichess" =
         normalized.includes("lichess") ? "lichess" : "chesscom";
       setProfile((p) => ({ ...p, provider }));
       setStage("username");
       pushAssistant(
-        `Perfect. Send your ${provider === "chesscom" ? "Chess.com" : "Lichess"} username.`,
+        `Perfect. Send your ${provider === "chesscom" ? "Chess.com" : "Lichess"} username (or type "None").`,
       );
-      return true;
+      return "consumed_wait";
     }
 
     if (stage === "username") {
+      if (isNoneToken(value)) {
+        setStage("ready");
+        setSuggestions([
+          "Help me with a training plan",
+          "How do I improve my openings?",
+          "I want to add account later",
+        ]);
+        pushAssistant("No problem — we will continue without account import for now.");
+        return "consumed_ready";
+      }
       setProfile((p) => ({ ...p, username: value }));
       setStage("maxGames");
-      pushAssistant("How many recent games should I scan? (10-1000)", ["200", "300", "500", "1000"]);
-      return true;
+      pushAssistant("How many recent games should I scan? (10-1000)", [
+        "200",
+        "300",
+        "500",
+        "1000",
+        "Skip onboarding",
+      ]);
+      return "consumed_wait";
     }
 
     if (stage === "maxGames") {
+      if (isNoneToken(value)) {
+        setStage("ready");
+        pushAssistant("Done. We skipped account scan. You can still ask for a custom training plan.");
+        return "consumed_ready";
+      }
       const n = Number(value);
       const maxGames = Number.isFinite(n) ? Math.max(10, Math.min(1000, Math.round(n))) : 300;
       const nextProfile = { ...profile, maxGames };
@@ -334,10 +426,10 @@ export default function DeepDivePage() {
       setSuggestions([]);
       pushAssistant("Awesome. Analyzing your account now...");
       await fetchProfile(nextProfile);
-      return true;
+      return "consumed_ready";
     }
 
-    return false;
+    return "not_consumed";
   };
 
   const sendChat = async () => {
@@ -346,8 +438,11 @@ export default function DeepDivePage() {
     setChatInput("");
     setMessages((prev) => [...prev, { id: uid(), role: "user", text: input }]);
 
-    const consumedByOnboarding = await handleOnboarding(input);
-    if (consumedByOnboarding && stage !== "ready") return;
+    if (stage === "ready") {
+      learnProfileFromFreeText(input);
+    }
+    const onboardingStatus = await handleOnboarding(input);
+    if (onboardingStatus === "consumed_wait") return;
 
     setChatBusy(true);
     try {
