@@ -24,6 +24,7 @@ import {
   MISSED_CP_THRESHOLD,
   AMAZING_CP_THRESHOLD,
   REVIEW_INACCURACY_CP_THRESHOLD,
+  ACCURACY_DECAY_CP,
   REVIEW_BLUNDER_CP_THRESHOLD,
   MISTAKE_SIGN_FLIP_CP_DROP,
   BLUNDER_SIGN_FLIP_CP_DROP,
@@ -366,7 +367,9 @@ export async function runFullGameReview(args: {
     const mover = gameMoves[ply].color;
     const lossCp = lossCpPerPly[ply];
     if (lossCp == null) continue;
-    const score = Math.round(Math.max(0, 100 * Math.exp(-lossCp / 40)));
+    const score = Math.round(
+      Math.max(0, 100 * Math.exp(-lossCp / ACCURACY_DECAY_CP)),
+    );
     if (mover === "w") {
       whiteSum += score;
       whiteN++;

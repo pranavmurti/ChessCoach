@@ -72,6 +72,8 @@ export type ChessBoardProps = {
   boardOrientation?: "white" | "black";
   /** Highlight this square (e.g. piece to move for a puzzle hint). */
   hintSquare?: string | null;
+  /** Optional global arrow navigation hook (left=back, right=forward). */
+  onArrowNavigate?: (dir: "back" | "forward") => void;
 };
 
 function legalDests(chess: Chess): Map<Key, Key[]> {
@@ -161,6 +163,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
       moveBadge,
       boardOrientation,
       hintSquare,
+      onArrowNavigate,
     },
     ref,
   ) {
@@ -181,12 +184,88 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
     onOrientationChangeRef.current = onOrientationChange;
     const onMoveRef = useRef(onMove);
     onMoveRef.current = onMove;
+    const onArrowNavigateRef = useRef(onArrowNavigate);
+    onArrowNavigateRef.current = onArrowNavigate;
+    const redoStackRef = useRef<
+      Array<{ from: string; to: string; promotion?: string }>
+    >([]);
 
     const [promote, setPromote] = useState<{
       orig: Key;
       dest: Key;
     } | null>(null);
     const [groundReady, setGroundReady] = useState(0);
+
+    const applyCurrentBoard = (
+      api: CgApi,
+      chess: Chess,
+      lastMove?: [Key, Key],
+      animationDuration?: number,
+    ) => {
+      applyGround(
+        api,
+        chess,
+        lastMove,
+        viewOnlyRef.current,
+        moveBadgeRef.current,
+        hintSquareRef.current,
+        animationDuration,
+      );
+    };
+
+    const doUndo = (): boolean => {
+      const api = apiRef.current;
+      if (!api) return false;
+      const undone = chessRef.current.undo();
+      if (!undone) return false;
+      redoStackRef.current.push({
+        from: undone.from,
+        to: undone.to,
+        promotion: undone.promotion ?? undefined,
+      });
+      setPromote(null);
+      applyCurrentBoard(api, chessRef.current);
+      onFenChangeRef.current?.(chessRef.current.fen());
+      return true;
+    };
+
+    const doRedo = (): boolean => {
+      const api = apiRef.current;
+      if (!api) return false;
+      const next = redoStackRef.current.pop();
+      if (!next) return false;
+      const ok = chessRef.current.move({
+        from: next.from as Square,
+        to: next.to as Square,
+        promotion:
+          next.promotion === "q" ||
+          next.promotion === "r" ||
+          next.promotion === "b" ||
+          next.promotion === "n"
+            ? next.promotion
+            : undefined,
+      });
+      if (!ok) return false;
+      setPromote(null);
+      applyCurrentBoard(
+        api,
+        chessRef.current,
+        [next.from as Key, next.to as Key],
+        260,
+      );
+      onFenChangeRef.current?.(chessRef.current.fen());
+      const last = chessRef.current.history({ verbose: true }).at(-1);
+      if (last) {
+        const promotion = last.promotion ?? "";
+        const uci = `${next.from}${next.to}${promotion ? String(promotion) : ""}`;
+        onMoveRef.current?.({
+          uci,
+          san: last.san,
+          color: last.color as "w" | "b",
+        });
+      }
+      return true;
+    };
 
     useImperativeHandle(ref, () => ({
       getFen: () => chessRef.current.fen(),
@@ -197,6 +276,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
         const v = validateFen(fen);
         if (!v.ok) return false;
         chessRef.current.load(fen);
+        redoStackRef.current = [];
         setPromote(null);
         const animate = opts?.animate === true;
         const lastMove = animate ? opts?.lastMove : undefined;
@@ -216,27 +296,13 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
         return true;
       },
       undo: () => {
-        const api = apiRef.current;
-        if (!api) return false;
-        const undone = chessRef.current.undo();
-        if (!undone) return false;
-        setPromote(null);
-        applyGround(
-          api,
-          chessRef.current,
-          undefined,
-          viewOnlyRef.current,
-          moveBadgeRef.current,
-          hintSquareRef.current,
-          undefined,
-        );
-        onFenChangeRef.current?.(chessRef.current.fen());
-        return true;
+        return doUndo();
       },
       reset: () => {
         const api = apiRef.current;
         if (!api) return;
         chessRef.current.reset();
+        redoStackRef.current = [];
         setPromote(null);
         applyGround(
           api,
@@ -369,6 +435,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
                 );
                 return;
               }
+              redoStackRef.current = [];
               applyGround(
                 api,
                 chess,
@@ -442,7 +509,33 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
       const onResize = () => {
         api.redrawAll();
       };
+      const isTypingInField = (target: EventTarget | null): boolean => {
+        if (!(target instanceof HTMLElement)) return false;
+        const tag = target.tagName;
+        return (
+          target.isContentEditable ||
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT"
+        );
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        if (isTypingInField(e.target)) return;
+        const nav = onArrowNavigateRef.current;
+        if (nav) {
+          e.preventDefault();
+          nav(e.key === "ArrowLeft" ? "back" : "forward");
+          return;
+        }
+        if (e.key === "ArrowLeft") {
+          if (doUndo()) e.preventDefault();
+        } else if (doRedo()) {
+          e.preventDefault();
+        }
+      };
       window.addEventListener("resize", onResize);
+      window.addEventListener("keydown", onKeyDown);
       const ro =
         typeof ResizeObserver !== "undefined"
           ? new ResizeObserver(() => {
@@ -456,6 +549,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
         el.removeEventListener("mousedown", refreshBounds, refreshOpts);
         el.removeEventListener("touchstart", refreshBounds, refreshOpts);
         window.removeEventListener("resize", onResize);
+        window.removeEventListener("keydown", onKeyDown);
         ro?.disconnect();
         api.destroy();
         apiRef.current = null;
@@ -486,6 +580,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
         );
         return;
       }
+      redoStackRef.current = [];
       applyGround(
         api,
         chess,

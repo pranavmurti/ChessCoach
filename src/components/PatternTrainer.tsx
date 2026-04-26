@@ -434,6 +434,10 @@ export function PatternTrainer({ queue, onSessionComplete, inline = false }: Pro
           moveBadge={moveBadge}
           boardOrientation={boardOrientation}
           hintSquare={hintSquare}
+          onArrowNavigate={(dir) => {
+            if (dir === "back") stepBack();
+            else stepForward();
+          }}
         />
       </div>
     </section>

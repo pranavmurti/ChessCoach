@@ -141,6 +141,7 @@ export default function HomePage() {
             View statistics →
           </Link>
         </article>
+
       </div>
     </SitePageShell>
   );

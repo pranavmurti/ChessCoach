@@ -108,6 +108,39 @@ body {
   animation: chess-piece-bob 2.6s ease-in-out infinite;
 }
 
+@keyframes coach-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(2deg);
+  }
+}
+
+@keyframes coach-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 24px rgb(124 58 237 / 0.22),
+      inset 0 0 0 1px rgb(255 255 255 / 0.22);
+  }
+  50% {
+    box-shadow:
+      0 14px 28px rgb(217 70 239 / 0.3),
+      inset 0 0 0 1px rgb(255 255 255 / 0.35);
+  }
+}
+
+.coach-icon-shell {
+  animation: coach-glow 3s ease-in-out infinite;
+}
+
+.coach-icon {
+  animation: coach-bob 2.1s ease-in-out infinite;
+}
+
+
 .home-float-slow {
   animation: home-float 16s ease-in-out infinite;
 }

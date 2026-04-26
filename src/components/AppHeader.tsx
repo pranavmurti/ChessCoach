@@ -7,6 +7,7 @@ const nav = [
   { href: "/coach", label: "Analyze" },
   { href: "/patterns", label: "Patterns" },
   { href: "/statistics", label: "Statistics" },
+  { href: "/deep-dive", label: "Deep Dive" },
 ] as const;
 
 export function AppHeader() {

@@ -37,6 +37,47 @@ type MoveProbe = {
   afterEvalLabel: string;
 };
 
+type LlmCandidate = {
+  rank: number;
+  uci: string;
+  san: string;
+  eval: string;
+};
+
+type LlmCoachPayload = {
+  question: string;
+  fen: string;
+  sideToMove: "white" | "black";
+  opening: string | null;
+  whiteRating: number;
+  blackRating: number;
+  bestMove: { san: string | null; uci: string | null; idea: string | null };
+  topCandidates: LlmCandidate[];
+  askedMoveProbe: MoveProbe | null;
+  actionChecklist: string[];
+};
+
+async function tryLlmCoachReply(
+  payload: LlmCoachPayload,
+): Promise<{ answer: string | null; error: string | null }> {
+  try {
+    const res = await fetch("/api/coach/llm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as { answer?: string; error?: string; detail?: string };
+    if (!res.ok) {
+      const err = [data.error, data.detail].filter(Boolean).join(": ");
+      return { answer: null, error: err || `HTTP ${res.status}` };
+    }
+    const text = data.answer?.trim();
+    return { answer: text ? text : null, error: text ? null : "Empty LLM response" };
+  } catch (err) {
+    return { answer: null, error: err instanceof Error ? err.message : "LLM request failed" };
+  }
+}
+
 function materialBalanceWhite(fenText: string): number {
   const placement = fenText.split(" ")[0] ?? "";
   const values: Record<string, number> = {
@@ -392,7 +433,7 @@ export async function answerThuggyBot(p: ThuggyParams): Promise<string> {
   const intentLine = [...intents].join(", ");
   const ratingVoice = ratingTone(userElo, seed);
 
-  return [
+  const fallbackReply = [
     `Question: ${q}`,
     `Opening context: ${openingLabel ?? "Unknown opening"}`,
     `Interpretation: ${intentLine}. ${ratingVoice}`,
@@ -406,4 +447,34 @@ export async function answerThuggyBot(p: ThuggyParams): Promise<string> {
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  const llm = await tryLlmCoachReply({
+    question: q,
+    fen: currentFen,
+    sideToMove: stm === "w" ? "white" : "black",
+    opening: openingLabel,
+    whiteRating: p.whiteRating,
+    blackRating: p.blackRating,
+    bestMove: { san: bestSan, uci: bestUci || null, idea: bestIdeaTxt },
+    topCandidates: top.slice(0, 3).map((l, i) => {
+      const uci = l.pvUci.split(/\s+/)[0] ?? "";
+      const san = uci ? uciToSan(currentFen, uci) ?? uci : "—";
+      const w = engineScoreToWhitePerspective(stm, l.cp, l.mate);
+      return {
+        rank: i + 1,
+        uci,
+        san,
+        eval: formatWhiteEval(w.cpWhite, w.mateWhite),
+      };
+    }),
+    askedMoveProbe: moveProbe,
+    actionChecklist,
+  });
+
+  if (llm.answer) return llm.answer;
+
+  return [
+    `LLM unavailable right now (${llm.error ?? "unknown reason"}). Showing fallback coaching output.`,
+    fallbackReply,
+  ].join("\n\n");
 }

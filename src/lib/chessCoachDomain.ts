@@ -17,6 +17,8 @@ export const BRILLIANT_MIN_MATERIAL_LOSS = 100;
 export const BRILLIANT_WINNING_CP_ADV = 350;
 export const BRILLIANT_WINNING_MATE_MAX = 12;
 export const REVIEW_INACCURACY_CP_THRESHOLD = 50;
+/** Lower value makes accuracy stricter (drops faster on eval loss). */
+export const ACCURACY_DECAY_CP = 28;
 export const REVIEW_BLUNDER_CP_THRESHOLD = 250;
 export const MISTAKE_SIGN_FLIP_CP_DROP = 50;
 export const BLUNDER_SIGN_FLIP_CP_DROP = 150;

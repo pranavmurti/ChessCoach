@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { ChessCoach } from "@/components/ChessCoach";
 import { SitePageShell } from "@/components/SitePageShell";
 
@@ -13,6 +15,14 @@ export default function CoachPage() {
         <h1 className="mt-3 text-3xl font-bold tracking-tight text-foreground md:text-4xl">
           Analyze &amp; review
         </h1>
+        <div className="mt-4">
+          <Link
+            href="/deep-dive"
+            className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-500"
+          >
+            Deep Dive with ThuggyBot
+          </Link>
+        </div>
       </header>
 
       <div className="mt-10 flex w-full justify-center">
