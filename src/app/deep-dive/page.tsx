@@ -1005,7 +1005,7 @@ export default function DeepDivePage() {
             onClick={resetDeepDiveMemory}
             className="rounded-md border border-black/10 px-2 py-1 text-xs text-foreground/70 transition hover:bg-black/5 dark:border-white/15 dark:hover:bg-white/5"
           >
-            Reset memory
+            Reset chat
           </button>
         </div>
 
