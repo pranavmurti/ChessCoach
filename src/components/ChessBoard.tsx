@@ -74,6 +74,8 @@ export type ChessBoardProps = {
   hintSquare?: string | null;
   /** Optional global arrow navigation hook (left=back, right=forward). */
   onArrowNavigate?: (dir: "back" | "forward") => void;
+  /** CSS size for both width/height. Defaults to the full analysis board size. */
+  boardSize?: string;
 };
 
 function legalDests(chess: Chess): Map<Key, Key[]> {
@@ -164,6 +166,7 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
       boardOrientation,
       hintSquare,
       onArrowNavigate,
+      boardSize,
     },
     ref,
   ) {
@@ -610,8 +613,8 @@ export const ChessBoard = forwardRef<ChessBoardHandle, ChessBoardProps>(
           ref={hostRef}
           className="cg-wrap rounded-sm shadow-lg ring-1 ring-black/10 dark:ring-white/10"
           style={{
-            width: "min(90vmin, 560px)",
-            height: "min(90vmin, 560px)",
+            width: boardSize ?? "min(90vmin, 560px)",
+            height: boardSize ?? "min(90vmin, 560px)",
           }}
         />
         {promote ? (

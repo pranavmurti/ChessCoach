@@ -8,9 +8,15 @@ import type { GameMove } from "@/lib/chessCoachDomain";
 import { reconstructFenForPly } from "@/lib/chessCoachDomain";
 import { runFullGameReview } from "@/lib/chessCoachReview";
 import { SitePageShell } from "@/components/SitePageShell";
-import type { StockfishClient } from "@/lib/stockfishClient";
+import type { EngineLine, StockfishClient } from "@/lib/stockfishClient";
 import { StockfishClient as StockfishClientClass } from "@/lib/stockfishClient";
 import { runStatsScan, type StatsScanResult } from "@/lib/statsAnalyze";
+import {
+  engineScoreToWhitePerspective,
+  formatWhiteEval,
+  uciSequenceToSan,
+  uciToSan,
+} from "@/lib/chessNotation";
 
 type ChatMessage = {
   id: string;
@@ -35,6 +41,14 @@ type CoachProfile = {
   provider: "chesscom" | "lichess";
   username: string;
   maxGames: number;
+};
+
+type VisibleEngineLine = {
+  rank: number;
+  uci: string;
+  san: string;
+  evalLabel: string;
+  lineSans: string;
 };
 
 function AssistantFlowText({
@@ -112,6 +126,35 @@ function isNoneToken(input: string): boolean {
   return v === "none" || v === "no account" || v === "dont have one" || v === "don't have one";
 }
 
+function requestedProvider(input: string): "chesscom" | "lichess" | null {
+  const lower = input.toLowerCase();
+  if (lower.includes("lichess")) return "lichess";
+  if (
+    lower.includes("chess.com") ||
+    lower.includes("chess com") ||
+    lower.includes("chesscom")
+  ) {
+    return "chesscom";
+  }
+  return null;
+}
+
+function isAccountIntent(input: string): boolean {
+  const lower = input.toLowerCase();
+  return (
+    lower.includes("account") ||
+    lower.includes("username") ||
+    lower.includes("games") ||
+    lower.includes("stats") ||
+    lower.includes("statistics") ||
+    lower.includes("analyze") ||
+    lower.includes("analyse") ||
+    lower.includes("scan") ||
+    lower.includes("switch") ||
+    lower.includes("change")
+  );
+}
+
 function summarizeStats(result: StatsScanResult): string {
   const topW = result.topOpeningsWhite[0];
   const topB = result.topOpeningsBlack[0];
@@ -130,7 +173,11 @@ function summarizeStats(result: StatsScanResult): string {
 export default function DeepDivePage() {
   const boardRef = useRef<ChessBoardHandle>(null);
   const engineRef = useRef<StockfishClient | null>(null);
+  const engineReadyRef = useRef(false);
+  const reviewEngineRef = useRef<StockfishClient | null>(null);
+  const reviewEngineReadyRef = useRef(false);
   const gameReviewSeqRef = useRef(0);
+  const visibleEngineSeqRef = useRef(0);
 
   const [profile, setProfile] = useState<CoachProfile>({
     skillLevel: "",
@@ -177,7 +224,12 @@ export default function DeepDivePage() {
   > | null>(null);
   const [reviewPly, setReviewPly] = useState(0);
   const [reviewUserLineMode, setReviewUserLineMode] = useState(false);
+  const [reviewBoardOrientation, setReviewBoardOrientation] = useState<"white" | "black">("white");
   const [flowMessageId, setFlowMessageId] = useState<string | null>(null);
+  const [visibleEngineFen, setVisibleEngineFen] = useState(DEFAULT_POSITION);
+  const [visibleEngineLines, setVisibleEngineLines] = useState<VisibleEngineLine[]>([]);
+  const [visibleEngineLoading, setVisibleEngineLoading] = useState(false);
+  const [visibleEngineEval, setVisibleEngineEval] = useState("—");
 
   const pushAssistant = (text: string, nextSuggestions?: string[]) => {
     const id = uid();
@@ -267,8 +319,140 @@ export default function DeepDivePage() {
     return () => {
       engineRef.current?.quit();
       engineRef.current = null;
+      engineReadyRef.current = false;
+      reviewEngineRef.current?.quit();
+      reviewEngineRef.current = null;
+      reviewEngineReadyRef.current = false;
     };
   }, []);
+
+  const getEngineClient = async (): Promise<StockfishClient> => {
+    let client = engineRef.current;
+    if (!client) {
+      client = new StockfishClientClass();
+      engineRef.current = client;
+      engineReadyRef.current = false;
+    }
+    if (!engineReadyRef.current) {
+      await client.init();
+      engineReadyRef.current = true;
+    }
+    return client;
+  };
+
+  const getReviewEngineClient = async (): Promise<StockfishClient> => {
+    let client = reviewEngineRef.current;
+    if (!client) {
+      client = new StockfishClientClass();
+      reviewEngineRef.current = client;
+      reviewEngineReadyRef.current = false;
+    }
+    if (!reviewEngineReadyRef.current) {
+      await client.init();
+      reviewEngineReadyRef.current = true;
+    }
+    return client;
+  };
+
+  const getActiveReviewFen = (): string => {
+    if (!reviewAnalysis || !reviewMoves.length) return positionFen.trim() || DEFAULT_POSITION;
+    if (reviewUserLineMode) return boardRef.current?.getFen() ?? DEFAULT_POSITION;
+    return reconstructFenForPly(reviewInitialFen, reviewMoves, reviewPly);
+  };
+
+  const formatEngineLine = (
+    fen: string,
+    line: EngineLine,
+    rank: number,
+  ): VisibleEngineLine | null => {
+    const uci = line.pvUci.split(/\s+/)[0] ?? "";
+    if (!uci) return null;
+    const chess = new Chess(fen);
+    const wp = engineScoreToWhitePerspective(chess.turn(), line.cp, line.mate);
+    const lineSans = uciSequenceToSan(fen, line.pvUci, 8).join(" ");
+    return {
+      rank,
+      uci,
+      san: uciToSan(fen, uci) ?? uci,
+      evalLabel: formatWhiteEval(wp.cpWhite, wp.mateWhite),
+      lineSans,
+    };
+  };
+
+  const showReviewPanelLines = (
+    analysis = reviewAnalysis,
+    moves = reviewMoves,
+    ply = reviewPly,
+    initialFen = reviewInitialFen,
+  ) => {
+    if (!analysis || !moves.length) return;
+    const item = analysis.review[ply];
+    const fen = reconstructFenForPly(initialFen, moves, ply);
+    setVisibleEngineFen(fen);
+    const evalPoint = analysis.evalSeries[ply];
+    setVisibleEngineEval(
+      evalPoint ? formatWhiteEval(evalPoint.cpWhite, evalPoint.mateWhite) : "—",
+    );
+    if (!item) {
+      setVisibleEngineLines([]);
+      return;
+    }
+    setVisibleEngineLines(
+      item.topUcis.slice(0, 3).map((uci, idx) => ({
+        rank: idx + 1,
+        uci,
+        san: uciToSan(fen, uci) ?? uci,
+        evalLabel: idx === 0 ? "Stockfish best" : "Candidate",
+        lineSans:
+          idx === 0 && item.bestLineSans
+            ? item.bestLineSans
+            : uciSequenceToSan(fen, uci, 1).join(" ") || uci,
+      })),
+    );
+  };
+
+  const refreshVisibleEngineLines = async (fenOverride?: string) => {
+    const seq = ++visibleEngineSeqRef.current;
+    const fen = fenOverride ?? getActiveReviewFen();
+    setVisibleEngineFen(fen);
+    setVisibleEngineLoading(true);
+    try {
+      const client = await getEngineClient();
+      const result = await client.analyzePosition(fen, { depth: 12, multipv: 3 });
+      if (seq !== visibleEngineSeqRef.current) return;
+      const chess = new Chess(fen);
+      const top = result.lines
+        .slice()
+        .sort((a, b) => (a.multipv ?? 99) - (b.multipv ?? 99))
+        .slice(0, 3);
+      const formatted = top
+        .map((line, i) => formatEngineLine(fen, line, i + 1))
+        .filter((line): line is VisibleEngineLine => line != null);
+      setVisibleEngineLines(formatted);
+      const first = top[0];
+      if (first) {
+        const wp = engineScoreToWhitePerspective(chess.turn(), first.cp, first.mate);
+        setVisibleEngineEval(formatWhiteEval(wp.cpWhite, wp.mateWhite));
+      } else {
+        setVisibleEngineEval("—");
+      }
+    } catch {
+      if (seq === visibleEngineSeqRef.current) {
+        setVisibleEngineEval((prev) => prev || "—");
+      }
+    } finally {
+      if (seq === visibleEngineSeqRef.current) setVisibleEngineLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!reviewAnalysis || !reviewMoves.length) return;
+    if (!reviewUserLineMode) {
+      showReviewPanelLines();
+    }
+    void refreshVisibleEngineLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewAnalysis, reviewPly, reviewUserLineMode]);
 
   const fetchProfile = async (profileOverride?: CoachProfile) => {
     const p = profileOverride ?? profile;
@@ -316,6 +500,106 @@ export default function DeepDivePage() {
     }
   };
 
+  const buildReviewContext = (): string => {
+    if (!reviewAnalysis || !reviewMoves.length) return "";
+    const currentIdx = reviewPly > 0 ? reviewPly - 1 : null;
+    const current = currentIdx != null ? reviewAnalysis.review[currentIdx] : null;
+    const beforeSelectedFen =
+      currentIdx != null
+        ? reconstructFenForPly(reviewInitialFen, reviewMoves, currentIdx)
+        : reviewInitialFen;
+    const afterSelectedFen = reconstructFenForPly(reviewInitialFen, reviewMoves, reviewPly);
+    const currentFen = reviewUserLineMode ? boardRef.current?.getFen() : afterSelectedFen;
+    const worstMoves = reviewAnalysis.review
+      .filter((r) => r.lossCp != null && r.lossCp >= 50)
+      .slice()
+      .sort((a, b) => (b.lossCp ?? 0) - (a.lossCp ?? 0))
+      .slice(0, 8)
+      .map(
+        (r) =>
+          `Move ${r.moveNo} ${r.side}: ${r.playedSan} was ${r.verdict}, lost ${r.lossCp ?? "?"}cp. Best: ${r.bestSan ?? r.bestUci}.`,
+      );
+    const critical = reviewAnalysis.critical
+      .slice(0, 8)
+      .map((c) => `Move ${c.moveNo} ${c.side}: ${c.tag} — ${c.note}`);
+    const selectedMove = current
+      ? [
+          `Selected move: Move ${current.moveNo} ${current.side} played ${current.playedSan}`,
+          `Verdict: ${current.verdict}`,
+          current.lossCp != null ? `Loss: ${current.lossCp}cp` : "",
+          `Best move: ${current.bestSan ?? current.bestUci}`,
+          current.bestLineSans ? `Best line: ${current.bestLineSans}` : "",
+      current.topUcis.length
+        ? `Stockfish candidate moves from the position before this move: ${current.topUcis
+            .map((uci, i) => `${i + 1}. ${uciToSan(beforeSelectedFen, uci) ?? uci}`)
+            .join(", ")}`
+        : "",
+          current.writeup ? `Existing review note: ${current.writeup}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "Selected move: start position / no move selected";
+
+    return [
+      "LOADED PGN GAME REVIEW CONTEXT",
+      `Game length: ${reviewMoves.length} plies`,
+      `Current ply: ${reviewPly}${reviewUserLineMode ? " (user is exploring a side line)" : ""}`,
+      `Current board FEN: ${currentFen}`,
+      `Position before selected move FEN: ${beforeSelectedFen}`,
+      `Position after selected move FEN: ${afterSelectedFen}`,
+      `Accuracy: White ${reviewAnalysis.accuracyWhite}%, Black ${reviewAnalysis.accuracyBlack}%`,
+      selectedMove,
+      worstMoves.length ? `Biggest mistakes/blunders:\n${worstMoves.join("\n")}` : "",
+      critical.length ? `Critical moments:\n${critical.join("\n")}` : "",
+      "When the user asks about this game, prioritize the selected move and the loaded review context over generic advice.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  };
+
+  const buildEngineGroundingBlock = (): string => {
+    const current =
+      reviewAnalysis && reviewMoves.length ? reviewAnalysis.review[reviewPly] : null;
+    const previous =
+      reviewAnalysis && reviewPly > 0 ? reviewAnalysis.review[reviewPly - 1] : null;
+    const visibleLines = visibleEngineLines.length
+      ? [
+          "CURRENT VISIBLE STOCKFISH PANEL",
+          `Analyzed FEN: ${visibleEngineFen}`,
+          `Evaluation: ${visibleEngineEval}`,
+          ...visibleEngineLines.map(
+            (line) =>
+              `${line.rank}. ${line.san} (${line.uci}) — ${line.evalLabel}. Line: ${line.lineSans || line.san}`,
+          ),
+          "The answer must explain these Stockfish suggestions in plain English. Do not invent another recommendation.",
+        ].join("\n")
+      : "";
+    if (!current) return visibleLines;
+    const currentFen = reconstructFenForPly(reviewInitialFen, reviewMoves, reviewPly);
+    const candidates = current.topUcis
+      .map((uci, i) => `${i + 1}. ${uciToSan(currentFen, uci) ?? uci} (${uci})`)
+      .join(", ");
+    return [
+      "MANDATORY ENGINE GROUNDING",
+      "This is the current board position, and the moves below are for the side who is about to move.",
+      `Current board ply: ${reviewPly}.`,
+      `Current board FEN: ${currentFen}.`,
+      `Stockfish best move for the side to move is ${current.bestSan ?? current.bestUci} (${current.bestUci}).`,
+      current.bestLineSans ? `Stockfish best line is: ${current.bestLineSans}.` : "",
+      candidates ? `Stockfish candidate list: ${candidates}.` : "",
+      previous
+        ? `Previous move shown on the board was ${previous.playedSan}, verdict ${previous.verdict}${
+            previous.lossCp != null ? `, loss ${previous.lossCp}cp` : ""
+          }.`
+        : "",
+      "If the user asks for the best move now, answer with the current Stockfish best move above.",
+      "If explaining the last move, use the previous move verdict. If explaining what to play next, use the current Stockfish best move.",
+      visibleLines,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+
   const learnProfileFromFreeText = (input: string) => {
     const lower = input.toLowerCase();
     const ratingMatch = lower.match(/\b(\d{3,4})\b/);
@@ -342,6 +626,30 @@ export default function DeepDivePage() {
   ): Promise<"consumed_wait" | "consumed_ready" | "not_consumed"> => {
     const value = input.trim();
     if (!value) return "consumed_wait";
+
+    const providerRequest = requestedProvider(value);
+    const providerSwitchIntent =
+      providerRequest != null &&
+      (isAccountIntent(value) ||
+        stage === "provider" ||
+        stage === "username" ||
+        stage === "ready");
+    if (providerRequest && providerSwitchIntent) {
+      setProfile((p) => ({ ...p, provider: providerRequest, username: "" }));
+      setStage("username");
+      setSuggestions(["None", "Skip onboarding"]);
+      pushAssistant(
+        `Sure — let's use ${providerRequest === "chesscom" ? "Chess.com" : "Lichess"} instead. What's your username there?`,
+      );
+      return "consumed_wait";
+    }
+
+    if (!providerRequest && isAccountIntent(value) && stage === "ready") {
+      setStage("provider");
+      setSuggestions(["Chess.com", "Lichess", "None"]);
+      pushAssistant("Sure — which account should I analyze, Chess.com or Lichess?");
+      return "consumed_wait";
+    }
 
     if (isSkipToken(value)) {
       setStage("ready");
@@ -479,6 +787,7 @@ export default function DeepDivePage() {
     setChatBusy(true);
     try {
       const contextBlock = [
+        buildEngineGroundingBlock(),
         "COACH PROFILE CONTEXT",
         `Skill level: ${profile.skillLevel || "unknown"}`,
         `Goal: ${profile.goal || "unknown"}`,
@@ -488,6 +797,7 @@ export default function DeepDivePage() {
         accountSummary ? `Account summary:\n${accountSummary}` : "Account summary: not loaded",
         statsNotes.trim() ? `User notes from statistics page:\n${statsNotes.trim()}` : "",
         patternsNotes.trim() ? `User notes from patterns page:\n${patternsNotes.trim()}` : "",
+        buildReviewContext(),
         messages.length
           ? `Recent chat memory:\n${messages
               .slice(-8)
@@ -499,19 +809,56 @@ export default function DeepDivePage() {
         .join("\n\n");
 
       const enrichedQuestion = `${input}\n\n---\n${contextBlock}`;
-      const sideToMove = positionFen.includes(" b ") ? "black" : "white";
+      const selectedReviewMove =
+        reviewAnalysis && reviewMoves.length ? reviewAnalysis.review[reviewPly] : null;
+      const activeFen =
+        reviewAnalysis && reviewMoves.length
+          ? getActiveReviewFen()
+          : positionFen.trim() || DEFAULT_POSITION;
+      const sideToMove = activeFen.includes(" b ") ? "black" : "white";
+      const visibleTopCandidates = visibleEngineLines.map((line) => ({
+        rank: line.rank,
+        uci: line.uci,
+        san: line.san,
+        eval: line.evalLabel,
+      }));
+      const visibleBest = visibleEngineLines[0] ?? null;
+
       const reply = await fetch("/api/coach/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: enrichedQuestion,
-          fen: positionFen.trim() || DEFAULT_POSITION,
+          fen: activeFen,
           sideToMove,
           opening: null,
           whiteRating: 1500,
           blackRating: 1500,
-          bestMove: null,
-          topCandidates: [],
+          bestMove: visibleBest
+            ? {
+                san: visibleBest.san,
+                uci: visibleBest.uci,
+                idea: visibleBest.lineSans
+                  ? `Stockfish line: ${visibleBest.lineSans}`
+                  : `Stockfish eval: ${visibleBest.evalLabel}`,
+              }
+            : selectedReviewMove
+            ? {
+                san: selectedReviewMove.bestSan,
+                uci: selectedReviewMove.bestUci,
+                idea: selectedReviewMove.bestLineSans || selectedReviewMove.writeup,
+              }
+            : null,
+          topCandidates: visibleTopCandidates.length
+            ? visibleTopCandidates
+            : selectedReviewMove
+              ? selectedReviewMove.topUcis.map((uci, idx) => ({
+                  rank: idx + 1,
+                  uci,
+                  san: uciToSan(activeFen, uci) ?? uci,
+                  eval: idx === 0 ? "Stockfish best" : "Stockfish candidate",
+                }))
+              : [],
           askedMoveProbe: null,
           actionChecklist: [],
         }),
@@ -565,14 +912,13 @@ export default function DeepDivePage() {
       setReviewMoves(moves);
       setReviewPly(0);
       setReviewUserLineMode(false);
+      setReviewAnalysis(null);
+      setReviewBoardOrientation("white");
+      setVisibleEngineLines([]);
+      setVisibleEngineEval("—");
       boardRef.current?.setFen(initialFen);
 
-      let client = engineRef.current;
-      if (!client) {
-        client = new StockfishClientClass();
-        engineRef.current = client;
-      }
-      await client.init();
+      const client = await getReviewEngineClient();
       const seq = ++gameReviewSeqRef.current;
       const analysis = await runFullGameReview({
         client,
@@ -585,6 +931,7 @@ export default function DeepDivePage() {
       });
       if (seq !== gameReviewSeqRef.current) return;
       setReviewAnalysis(analysis);
+      showReviewPanelLines(analysis, moves, 0, initialFen);
       pushAssistant(
         "Game review ready. Use Prev/Next to walk through moves and I will highlight inaccuracies, mistakes, and blunders.",
       );
@@ -617,6 +964,17 @@ export default function DeepDivePage() {
     else if (item.verdict === "brilliant") kind = "brilliant";
     else if (item.verdict === "excellent") kind = "best";
     return { square: item.landedSquare, icon: "", kind };
+  })();
+
+  const reviewArrows: ChessBoardProps["analysisArrows"] = (() => {
+    if (!reviewAnalysis || reviewUserLineMode) return {};
+    const item = reviewAnalysis.review[reviewPly];
+    if (!item) return {};
+    return {
+      bestUci: item.bestUci,
+      coachUci: item.eloBestUci || null,
+      lineUcis: item.topUcis,
+    };
   })();
 
   return (
@@ -793,20 +1151,72 @@ export default function DeepDivePage() {
             {reviewError ? <span className="text-xs text-red-600">{reviewError}</span> : null}
           </div>
 
-          <div className="mt-3 rounded-lg border border-black/10 p-2 dark:border-white/10">
-            <div className="mx-auto max-w-[340px]">
-              <ChessBoard
-                ref={boardRef}
-                viewOnly={false}
-                boardOrientation="white"
-                moveBadge={reviewBadge}
-                onMove={() => {
-                  setReviewUserLineMode(true);
-                }}
-                onArrowNavigate={(dir) => {
-                  stepReview(dir === "back" ? -1 : 1);
-                }}
-              />
+          <div className="mt-3 overflow-hidden rounded-lg border border-black/10 p-2 dark:border-white/10">
+            <div className="grid min-w-0 gap-3 md:grid-cols-[360px_minmax(0,1fr)]">
+              <div className="mx-auto w-full max-w-[360px]">
+                <ChessBoard
+                  ref={boardRef}
+                  viewOnly={false}
+                  boardOrientation={reviewBoardOrientation}
+                  onOrientationChange={setReviewBoardOrientation}
+                  moveBadge={reviewBadge}
+                  analysisArrows={reviewArrows}
+                  boardSize="min(78vw, 360px)"
+                  onMove={() => {
+                    setReviewUserLineMode(true);
+                    window.setTimeout(() => {
+                      void refreshVisibleEngineLines(boardRef.current?.getFen());
+                    }, 80);
+                  }}
+                  onArrowNavigate={(dir) => {
+                    stepReview(dir === "back" ? -1 : 1);
+                  }}
+                />
+              </div>
+              <div className="min-w-0 rounded-xl border border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-zinc-950/45">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-foreground/60">
+                    Stockfish suggestions
+                  </p>
+                  {visibleEngineLoading ? (
+                    <span className="text-[11px] text-violet-700 dark:text-violet-300">
+                      analyzing...
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                  Eval: {visibleEngineEval}
+                </p>
+                <div className="mt-2 max-h-[360px] space-y-1.5 overflow-y-auto pr-1">
+                  {visibleEngineLines.length ? (
+                    visibleEngineLines.map((line) => (
+                      <div
+                        key={`${line.rank}-${line.uci}`}
+                        className="min-w-0 rounded-lg border border-black/10 bg-black/[0.03] p-1.5 text-[11px] dark:border-white/10 dark:bg-white/[0.04]"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-foreground">
+                            {line.rank}. {line.san}
+                          </span>
+                          <span className="text-foreground/60">{line.evalLabel}</span>
+                        </div>
+                        <p className="mt-0.5 break-words text-foreground/65">
+                          {line.lineSans || line.uci}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-foreground/55">
+                      {visibleEngineLoading
+                        ? "Loading engine lines..."
+                        : "Review is loaded for the full PGN timeline. Step to a position to refresh engine lines."}
+                    </p>
+                  )}
+                </div>
+                <p className="mt-3 text-[11px] text-foreground/50">
+                  Thuggy uses these exact Stockfish lines as the source of truth when explaining this position.
+                </p>
+              </div>
             </div>
             <div className="mt-2 flex items-center justify-center gap-2">
               <button
@@ -820,6 +1230,13 @@ export default function DeepDivePage() {
               <span className="text-xs text-foreground/70">
                 Move {reviewPly} / {reviewMoves.length}
               </span>
+              <button
+                type="button"
+                onClick={() => boardRef.current?.flip()}
+                className="rounded-md border border-black/10 px-2 py-1 text-xs disabled:opacity-40 dark:border-white/15"
+              >
+                Flip
+              </button>
               <button
                 type="button"
                 onClick={() => stepReview(1)}
